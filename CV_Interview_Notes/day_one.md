@@ -27,3 +27,41 @@ def shuffle(arr):
         rand_idx = random.randint(i,len(arr)-1)
         arr[i], arr[rand_idx] = arr[rand_idx], arr[i]
 return arr
+
+对h×w的二维灰度图进行均值滤波，模板矩阵k×k：双重循环遍历二维数组，其中嵌套双重循环加和k×k个元素求均值
+```py
+import numpy as np
+'''
+函数的输入参数为原图像img和模板大小k，返回值为均值滤波后的图像。
+首先定义了模板中心距离边界的偏移量h_k和w_k。然后定义函数返回值result，并初始化为一个和原图像大小相同的全0矩阵。
+接下来，通过双重循环遍历原图像的每个像素点(i, j)，并将模板覆盖在当前像素点(i, j)上。
+对于模板中的每一个元素(m, n)，需要考虑其是否越界。这里用了max和min函数来确保不超出原图像的边界。
+对于在原图像范围内的模板元素，将其像素值累加到sum变量中，并将计数器count加1。最后，用sum除以count来求这k×k个元素的均值，并将结果赋值给result矩阵中对应的像素值。
+循环结束后，函数返回result作为均值滤波后的图像。
+'''
+def mean_filter(img, k):
+    h, w = img.shape
+    h_k, w_k = k//2, k//2
+    result = np.zero((h, w), dtype=np.uint8)
+    for i in range(h):
+        for j in range(w):
+            sum = 0
+            count = 0
+            for m in range(max(i-h_k, 0), min(i+h_k+1, h)):
+                for n in range(max(j-w_k, 0), min(j+w_k+1, w)):
+                    sum += img[m, n]
+                    count += 1
+            result[i, j] = sum // count
+    return result
+
+
+DenseUNet和ResNet
+DenseUNet和ResUNet是两种用于语义分割的卷积神经网络模型。
+DenseUNet模型基于DenseNet的思想，将迭代连接（skip connections）应用到了UNet模型中，提高了模型的学习能力和特征表达能力。该模型还针对边缘区域的分割效果差的问题，采用了VGG-16 的结构对边缘区域进行优化。
+
+DenseUNet的设计思想主要是将经典的UNet网络与稠密连接（Dense Connection）的概念相结合，以提高图像分割的性能。稠密连接是指将前一层输出与当前层输入连接在一起，使得当前层可以接收到前一层的所有信息，从而增强了特征的复用性，加快了特征传递速度，提高了模型的训练效率。
+具体来说，DenseUNet将UNet的编码器和解码器部分中的每个卷积块都改成稠密连接块。在编码器部分，每个稠密连接块由一个3×3 卷积层和一个下采样层组成，并且每个输入都连接到当前层上。在解码器部分，每个稠密连接块由一个上采样层、一个3×3 卷积层、一个跳跃连接连接和一个此前的编码器部分的相应层输出连接组成。
+除此之外，DenseUNet还采用了多尺度的输入和输出模块来处理不同尺度的图像，以及引入了残差连接来消除梯度消失、加快收敛速度。这些设计思想使得DenseUNet在与其他图像分割方法进行比较时，具有更好的分割精度和更快的计算速度。
+
+ResUNet模型基于ResNet和UNet的思想，使用残差连接和迭代连接实现了端到端地语义分割。该模型在高分辨率图像处理任务中表现优秀，同时还加入了空洞卷积（dilated convolution）和批归一化（batch normalization）等技术，进一步提高了模型的性能
+总的来说，DenseUNet和ResUNet都是比较优秀的语义分割模型，但具体应该选择哪一个模型还需要根据任务的具体需求进行选择。
