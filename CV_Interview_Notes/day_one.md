@@ -53,9 +53,9 @@ def mean_filter(img, k):
                     count += 1
             result[i, j] = sum // count
     return result
+```
 
-
-DenseUNet和ResNet
+### DenseUNet和ResNet
 DenseUNet和ResUNet是两种用于语义分割的卷积神经网络模型。
 DenseUNet模型基于DenseNet的思想，将迭代连接（skip connections）应用到了UNet模型中，提高了模型的学习能力和特征表达能力。该模型还针对边缘区域的分割效果差的问题，采用了VGG-16 的结构对边缘区域进行优化。
 
