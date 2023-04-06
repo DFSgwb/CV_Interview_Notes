@@ -65,3 +65,180 @@ DenseUNet的设计思想主要是将经典的UNet网络与稠密连接（Dense C
 
 ResUNet模型基于ResNet和UNet的思想，使用残差连接和迭代连接实现了端到端地语义分割。该模型在高分辨率图像处理任务中表现优秀，同时还加入了空洞卷积（dilated convolution）和批归一化（batch normalization）等技术，进一步提高了模型的性能
 总的来说，DenseUNet和ResUNet都是比较优秀的语义分割模型，但具体应该选择哪一个模型还需要根据任务的具体需求进行选择。
+
+
+### boundary_loss
+```py
+import torch
+
+def boundary_loss(pred, mask):
+    '''
+    pred: 模型预测结果, (batch_size, channels, height, width)
+    mask: 分割图, (batch_size, channels, height, width)
+
+    return:
+    boundary_loss: 边界损失
+    '''
+
+    # 计算梯度，得到边缘位置
+    pred_grad_x = torch.abs(pred[:, :, :, :-1] - pred[:, :, :, 1:])
+    pred_grad_y = torch.abs(pred[:, :, :-1, :] - pred[:, :, 1:, :])
+
+    mask_grad_x = torch.abs(mask[:, :, :, :-1] - mask[:, :, :, 1:])
+    mask_grad_y = torch.abs(mask[:, :, :-1, :] - mask[:, :, 1:, :])
+
+    # 计算boundary loss
+    loss_x = pred_grad_x * mask_grad_x
+    loss_y = pred_grad_y * mask_grad_y
+
+    # 对loss进行求和和平均
+    boundary_loss = (torch.sum(loss_x) / torch.sum(mask_grad_x) +
+                     torch.sum(loss_y) / torch.sum(mask_grad_y)) / 2
+
+    return boundary_loss
+```
+
+Boundary Loss是一种针对目标检测任务的损失函数，用于优化物体边缘的预测。我们可以使用PyTorch实现Boundary Loss。
+
+首先，我们需要导入需要的PyTorch库。
+
+```python
+import torch
+import torch.nn as nn
+```
+
+接下来，我们可以定义Boundary Loss的实现。
+
+```python
+class BoundaryLoss(nn.Module):
+    def __init__(self, alpha=1.0, beta=1.0, reduction='mean'):
+        super(BoundaryLoss, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.reduction = reduction
+
+    def forward(self, pred, mask):
+        """
+        :param pred: (B, C, H, W) - 模型的预测边缘图
+        :param mask: (B, C, H, W) - 真实边缘图
+        :return: boundary_loss - 边缘损失
+        """
+        # 计算边缘区域
+        dilated_mask = torch.clamp(
+            nn.functional.max_pool2d(mask, (3, 3), stride=1, padding=1) - mask, 0, 1)
+        boundary_mask = mask - dilated_mask
+
+        # 将边缘区域应用于预测边缘图
+        boundary_pred = pred * boundary_mask
+
+        # 计算损失
+        pos_loss = boundary_mask * torch.log(pred + 1e-8)
+        neg_loss = (1 - boundary_mask) * torch.log(1 - boundary_pred + 1e-8)
+        boundary_loss = -self.alpha * pos_loss - self.beta * neg_loss
+
+        # 返回损失
+        if self.reduction == 'mean':
+            return torch.mean(boundary_loss)
+        elif self.reduction == 'sum':
+            return torch.sum(boundary_loss)
+        else:
+            return boundary_loss
+```
+
+在实现中，首先我们计算真实边缘图的边缘区域，然后将边缘区域应用于模型的预测边缘图。接着，我们计算正样本和负样本的损失，最终求和得到边缘损失。最后，我们根据设定的reduction参数，选择使用平均值或总和作为最终的损失。（注意，在计算log时，加上一个很小的值1e-8，避免出现log(0)的情况）
+
+接下来，我们将Boundary Loss应用于目标检测任务中。
+
+```python
+# 定义模型
+class MyDetectionModel(nn.Module):
+    def __init__(self):
+        super(MyDetectionModel, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.relu1 = nn.ReLU()
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.relu2 = nn.ReLU()
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=1, kernel_size=1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.relu2(x)
+        x = self.conv3(x)
+        x = self.sigmoid(x)
+        return x
+
+# 定义超参
+lr = 0.001
+epochs = 10
+alpha, beta = 1.0, 1.0
+reduction = 'mean'
+
+# 定义数据加载器
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True)
+
+# 定义模型和优化器
+model = MyDetectionModel().to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+# 定义损失函数
+criterion = BoundaryLoss(alpha=alpha, beta=beta, reduction=reduction)
+
+# 训练模型
+for epoch in range(epochs):
+    for i, (images, targets) in enumerate(train_loader):
+        images = images.to(device)
+        targets = targets.to(device)
+
+        optimizer.zero_grad()
+        
+        outputs = model(images)
+        loss = criterion(outputs, targets)
+
+        loss.backward()
+        optimizer.step()
+```
+
+在训练环节中，我们加载数据，定义模型和优化器，并使用Boundary Loss作为损失函数进行优化。由于Boundary Loss针对物体边缘的优化，因此特别适合目标检测任务。
+
+Boundary Loss是一种用于图像分割任务的损失函数，其核心思想是度量预测的边缘和真实边缘之间的距离，从而帮助网络更好地学习边缘信息。以下是在PyTorch中实现Boundary Loss的代码：
+
+```python
+import torch
+
+def boundary_loss(pred, target):
+    """
+    Implementation of boundary loss in PyTorch.
+    :param pred: predicted segmentation mask, dimension: (N, C, H, W)
+    :param target: ground-truth segmentation mask, dimension: (N, C, H, W)
+    :return: boundary loss value
+    """
+    bce_loss = torch.nn.BCELoss(reduction="mean")
+    
+    # Compute the gradient of the target mask along both spatial dimensions
+    target_x_grad = torch.abs(target[:, :, :, :-1] - target[:, :, :, 1:])
+    target_y_grad = torch.abs(target[:, :, :-1, :] - target[:, :, 1:, :])
+    target_edge = target_x_grad + target_y_grad
+    
+    # Compute the gradient of the predicted mask along both spatial dimensions
+    pred_x_grad = torch.abs(pred[:, :, :, :-1] - pred[:, :, :, 1:])
+    pred_y_grad = torch.abs(pred[:, :, :-1, :] - pred[:, :, 1:, :])
+    pred_edge = pred_x_grad + pred_y_grad
+    
+    # Compute the boundary loss, which is the mean of the element-wise product of 
+    # the binary target edge (1 inside the boundary, 0 outside) and the distance 
+    # between the predicted edge and the target edge
+    loss = bce_loss(target_edge, torch.clamp(pred_edge, 0, 1)) * target_edge.mean()
+    
+    return loss
+```
+
+在上述代码中，我们首先定义了一个标准的BCELoss作为Boundary Loss的基础。然后，我们以类似于Sobel算子的方式计算了目标和预测掩码的梯度，并将它们相加得到两个边缘掩码。接下来，我们计算了Boundary Loss，这是目标边缘掩码中每个像素距离它最近的预测边缘掩码像素的欧氏距离的平均值。我们在这里使用了torch.clamp(0,1)来进行预测边缘掩码的截断，以避免边缘像素梯度过大导致训练不稳定。
+
+最后要注意的一点是，由于在计算Boundary Loss时我们使用了二进制掩码来筛选边界区域，因此我们需要将目标和预测掩码的数值范围压缩到[0,1]之间。如果您的数据集的标签具有多个类别，则需要对每个类别分别计算Boundary Loss，并对这些损失值进行加权平均。
